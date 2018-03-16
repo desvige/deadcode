@@ -28,7 +28,7 @@ for line in open(relo):
         refs[name] = 1337
 
 # Retrieve dead functions and write to disk.
-file = ‘dead.txt'
+file = 'dead.txt'
 if os.path.isfile(file):
     os.remove(file)
 file = open(file, 'w')
