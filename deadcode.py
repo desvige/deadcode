@@ -1,38 +1,113 @@
 #!/usr/bin/python
 
-import re
-import os
-import sys
+import os, re, subprocess, sys
 
-dump = sys.argv[1]
-relo = sys.argv[2]
+#-------------------------------------------------------------------------------
+# Disassemble
+#-------------------------------------------------------------------------------
 
-# Retrieve function names.
-names = list()
-for line in open(dump):
-   match = re.search('^\w+ <(.*)>:$', line)
-   if match:
-       name = match.group(1)
-       # Remove '@plt' eventually.
-       match = re.search('^(\w+)@plt$', name)
-       if match:
-           name = match.group(1)
-       names.append(name)
+def Disassemble(elf_binary):
+  filename = elf_binary + ".asm"
+  os.system("objdump --disassemble " + elf_binary + " > " + filename)
+  with open(filename, "r") as file:
+    return file.readlines()
 
-# Retrieve references to functions.
-refs = dict()
-for line in open(relo):
-    match = re.search('(\w+)$', line)
+#-------------------------------------------------------------------------------
+# GetCalledFunctions
+#-------------------------------------------------------------------------------
+
+def GetCalledFunctions(asm):
+  fns = set()
+  for line in asm:
+    match = re.search('call.* <(.*)>$', line)
     if match:
-        name = match.group(1)
-        refs[name] = 1337
+      fn = RemovePltIfNeeded(match.group(1))
+      fns.add(fn)
 
-# Retrieve dead functions and write to disk.
-file = 'dead.txt'
-if os.path.isfile(file):
-    os.remove(file)
-file = open(file, 'w')
-for name in names:
-    if not name in refs:
-        file.write(name)
-        file.write('\n')
+  return fns;
+
+#-------------------------------------------------------------------------------
+# GetFunctionNames
+#-------------------------------------------------------------------------------
+
+def GetFunctionNames(asm):
+  fns = set()
+  for line in asm:
+    match = re.search('^\w+ <(.*)>:$', line)
+    if match:
+      fn = RemovePltIfNeeded(match.group(1))
+      if not IsCompilerFunction(fn) and not IsRuntimeFunction(fn):
+        fns.add(fn)
+
+  return fns;
+
+#-------------------------------------------------------------------------------
+# GetReferencedFunctions
+#-------------------------------------------------------------------------------
+
+def GetReferencedFunctions(relocs):
+  fns = set()
+  for line in relocs:
+    match = re.search('  (\w+)$', line)
+    if match:
+      fn = match.group(1)
+      fns.add(fn)
+
+  return fns;
+
+#-------------------------------------------------------------------------------
+# GetRelocations
+#-------------------------------------------------------------------------------
+
+def GetRelocations(elf_bin):
+  filename = elf_bin + ".relocs"
+  os.system("objdump --dynamic-reloc " + elf_bin + " > " + filename)
+  with open(filename, "r") as file:
+    return file.readlines()
+
+#-------------------------------------------------------------------------------
+# IsCompilerFunction
+#-------------------------------------------------------------------------------
+
+def IsCompilerFunction(fn):
+  return re.search('^\_\_', fn)
+
+#-------------------------------------------------------------------------------
+# IsRuntimeFunction
+#-------------------------------------------------------------------------------
+
+def IsRuntimeFunction(fn):
+  runtime_fns = set([
+      '.plt', '_fini', '_init', '_start', 'deregister_tm_clones', 'frame_dummy',
+      'main', 'register_tm_clones'])
+
+  return (fn in runtime_fns)
+
+#-------------------------------------------------------------------------------
+# RemovePltIfNeeded
+#-------------------------------------------------------------------------------
+
+def RemovePltIfNeeded(symbol):
+  match = re.search('^(\w+)@plt$', symbol)
+  if match:
+    symbol = match.group(1)
+
+  return symbol;
+
+#-------------------------------------------------------------------------------
+# main
+#-------------------------------------------------------------------------------
+
+elf_bin = sys.argv[1]
+asm = Disassemble(elf_bin)
+relocs = GetRelocations(elf_bin)
+
+all_fns = GetFunctionNames(asm)
+called_fns = GetCalledFunctions(asm)
+refd_fns = GetReferencedFunctions(relocs)
+
+used_fns = called_fns.union(refd_fns)
+dead_fns = all_fns.difference(used_fns)
+
+for fn in dead_fns:
+  print(fn)
